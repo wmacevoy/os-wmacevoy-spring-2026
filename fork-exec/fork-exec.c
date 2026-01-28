@@ -6,7 +6,11 @@
 
 void child() {
     printf("Hello from Child Process (pid %d)!\n", getpid());
-    execl("./hi", "hi", (char *)NULL);
+    int status = execl("./hi", "hi", (char *)NULL);
+    if (status == -1) {
+        perror("execl failed");
+        exit(EXIT_FAILURE);
+    }
 //    sleep(1);
     printf("Child Process (pid %d) exiting.\n", getpid());
 }
