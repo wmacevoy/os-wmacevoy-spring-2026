@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#define DEBUG 0
+
 double prob_left = 0.2;
 double prob_middle = 0.2;
 double prob_right = 0.6;
@@ -40,15 +42,32 @@ int main(int argc, char *argv[]) {
 
     printf("prob,location\n");
 
+    pid_t left_pid = -1;
+    int left_status = 0;
+    pid_t middle_pid = -1;
+    int middle_status = 0;
+    pid_t right_pid = -1;
+    int right_status = 0;
+
 
     while (step < steps) {
-        if (prob*prob_left > prob_min && fork() == 0) { step_left(); }
-        else if (prob*prob_middle > prob_min && fork() == 0) { step_middle(); }
-        else if (prob*prob_right > prob_min && fork() == 0) { step_right(); }
-        else { return 0; }
+        if (prob*prob_left > prob_min && (left_pid=fork()) == 0) { step_left(); }
+        else if (prob*prob_middle > prob_min && (middle_pid=fork()) == 0) { step_middle(); exit(1); }
+        else if (prob*prob_right > prob_min && (right_pid=fork()) == 0) { step_right(); }
+        else {
+            #if DEBUG
+            printf("Debug: process %d terminating early at step %d with prob %lg\n", getpid(), step, prob);
+            #endif
+            if (left_pid > 0) waitpid(left_pid,&left_status,0);
+            if (middle_pid > 0) waitpid(middle_pid,&middle_status,0);
+            if (right_pid > 0) waitpid(right_pid,&right_status,0);
+
+            printf("%d, %d, %d\n", left_status, middle_status, right_status);
+            return 0; 
+        }
     }
 
-    printf("%4d,%lg\n", location, prob);
+    printf("%4d,%lg,%d\n", location, prob, getpid());
     return 0;
 }
 
