@@ -33,6 +33,18 @@ struct cookie_sheet {
 struct oven oven = { .temperature = 0, .mutex = PTHREAD_MUTEX_INITIALIZER };
 struct cookie_sheet cookie_sheet = { .cookies = 0, .mutex = PTHREAD_MUTEX_INITIALIZER };
 
+int alice_cooking() {
+    // Simulate cooking time
+    cookie_sheet.cookies = 12;
+    oven.temperature = 350;
+    if (bad_tempperature_sensor()) {
+        printf("Alice's oven is broken!\n");
+        return -1;
+    }
+    sleep(4);
+    return 0;
+}
+
 void *cook_alice(void *arg) {
     bool cooked = false;
     while (!cooked) {
@@ -44,10 +56,15 @@ void *cook_alice(void *arg) {
             if (pthread_mutex_timedlock(&cookie_sheet.mutex, &deadline) == 0) {
                 my_cookie_sheet = true;
                 printf("Alice is cooking cookies...\n");
-                cookie_sheet.cookies = 12;
-                oven.temperature = 350;
-                sleep(4);
-                cooked = true;
+                int result = alice_cooking();
+                if (result == -1) {
+                    cooked = false;
+                    if (my_cookie_sheet) pthread_mutex_unlock(&cookie_sheet.mutex);
+                    if (my_oven) pthread_mutex_unlock(&oven.mutex);
+                    return NULL; // Exit thread if oven is broken (now fixed).
+                } else {
+                    cooked = true;
+                }
             }
         }
         if (my_cookie_sheet) pthread_mutex_unlock(&cookie_sheet.mutex);

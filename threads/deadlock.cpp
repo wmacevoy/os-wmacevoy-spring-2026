@@ -1,127 +1,114 @@
 #include <thread>
-#include <mutex>
-#include <time.h>        // clock_gettime, timespec
+#include <time.h>
 #include <functional>
+#include <chrono>
+#include <array>
+#include <iostream>
+#include <cstdlib>
+#include <unistd.h>
 
-
-static struct timespec timespec_add_ms(struct timespec t, long ms) {
-    t.tv_sec  += ms / 1000;
-    t.tv_nsec += (ms % 1000) * 1000000L;
-    if (t.tv_nsec >= 1000000000L) { t.tv_sec++; t.tv_nsec -= 1000000000L; }
-    return t;
-}
-
-static struct timespec deadline_from_now(long ms) {
-    struct timespec now;
-    clock_gettime(CLOCK_REALTIME, &now);          // timed APIs often use REALTIME
-    return timespec_add_ms(now, ms);
-}
-
+// Finally is a C++ scope guard that executes a provided function when it goes out of scope, ensuring that resources are released properly even in the case of exceptions or early returns.
+// Example usage:
+// {     auto release = Finally([](){ /* cleanup code here */ });
+//     // code that may throw or return early
+// } // cleanup code is automatically called here
 class Finally {
-    private: std::function<void()> _func;
-    public: Finally(std::function<void()> func) : _func(func) {}
-    public: ~Finally() { _func(); }
+private: std::function<void()> _func;
+public:  Finally(std::function<void()> func) : _func(std::move(func)) {}
+public:  ~Finally() { _func(); }
+         Finally(const Finally&) = delete;
+         Finally& operator=(const Finally&) = delete;
+         Finally(Finally&&) = default;
+         Finally& operator=(Finally&&) = default;
 };
 
 class Guarded {
-    private: pthread_t _owner = 0;
-    private: pthread_mutex_t _mutex = PTHREAD_MUTEX_INITIALIZER;
-    public: bool own() const { return _owner == pthread_self(); }
-    public: bool reserve(struct timespec deadline) {
-        if (pthread_mutex_timedlock(&_mutex, &deadline) == 0) {
-            _owner = pthread_self();
-            return true;
-        }
-        return false;
-    }
-    public: bool reserve() {
-        if (pthread_mutex_lock(&_mutex) == 0) {
-            _owner = pthread_self();
-            return true;
-        }
-        return false;
-    }
-    public: void release() {
-        if (own()) {
-            _owner = 0;
-            pthread_mutex_unlock(&_mutex);
-        }
-    }
-    protected: void guard() const {
-        if (!own()) {
-            throw std::runtime_error("Must reserve before accessing guarded resource");
+private: pthread_t _owner = 0;
+private: pthread_mutex_t _mutex = PTHREAD_MUTEX_INITIALIZER;
+public:  bool own() const { return _owner == pthread_self(); }
+public:  bool reserve(const std::chrono::system_clock::time_point &deadline) {
+             auto secs = std::chrono::time_point_cast<std::chrono::seconds>(deadline);
+             auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - secs);
+             struct timespec ts = { .tv_sec = secs.time_since_epoch().count(),
+                                    .tv_nsec = ns.count() };
+             if (pthread_mutex_timedlock(&_mutex, &ts) == 0) {
+                 _owner = pthread_self();
+                 return true;
+             }
+             return false;
+         }
+public:  void release() {
+             if (own()) {
+                 _owner = 0;
+                 pthread_mutex_unlock(&_mutex);
+             }
+         }
+protected: void guard() const {
+               if (!own()) throw std::runtime_error("Must reserve before accessing guarded resource");
+           }
+public:
+    template<typename... Resources>
+    static Finally requires_all(uint32_t timeout_ms, uint32_t backoff_ms, Resources&... resources) {
+        std::array<Guarded*, sizeof...(Resources)> arr{&resources...};
+        for (;;) {
+            auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(timeout_ms);
+            size_t i = 0;
+            while (i < arr.size() && arr[i]->reserve(deadline)) {
+                ++i;
+            }
+            if (i == arr.size()) {
+                return Finally([arr](){
+                    for (auto* r : arr) r->release();
+                });
+            }
+            while (i > 0) {
+                arr[--i]->release();
+            }
+            usleep(1000 * (rand() % backoff_ms + 1));
         }
     }
 };
 
 class GuardedOven : public Guarded {
-    private: int _temperature = 0;
-    public: int temperature() const {
-        guard();
-        return _temperature;
-    }
-    public: void temperature(int temp) {
-        guard();
-        _temperature = temp; 
-    }
+private: int _temperature = 0;
+public:  int temperature() const { guard(); return _temperature; }
+public:  void temperature(int temp) { guard(); _temperature = temp; }
 };
 
 class GuardedCookieSheet : public Guarded {
-    private: int _cookies = 0;
-    public: int cookies() const {
-        guard();
-        return _cookies;
-    }
-    public: void cookies(int cookies) {         
-        guard();
-        _cookies = cookies; 
-    }
+private: int _cookies = 0;
+public:  int cookies() const { guard(); return _cookies; }
+public:  void cookies(int c) { guard(); _cookies = c; }
 };
-
 
 GuardedOven oven;
 GuardedCookieSheet cookieSheet;
 
 void alice() {
-    for(;;) {
-        Finally release([&](){ oven.release(); cookieSheet.release(); });
-        struct timespec deadline = deadline_from_now(5000);
-        if (!oven.reserve(deadline) || !cookieSheet.reserve(deadline)) {
-            printf("Alice failed to reserve oven, retrying...\n");
-            sleep(rand() % 6 + 1); // Sleep 1-6 seconds before retrying
-            continue;
-        }
-        printf("Alice is cooking cookies...\n");
-        cookieSheet.cookies(12);
-        oven.temperature(350);
-        sleep(4);
-        break;
-    }
+    const int timeout_ms = 5000;
+    const int backoff_ms = 6000;
+    auto release = Guarded::requires_all(timeout_ms, backoff_ms, oven, cookieSheet);
+    std::cout << "Alice is cooking cookies..." << std::endl;
+    cookieSheet.cookies(12);
+    oven.temperature(350);
+    sleep(4);
 }
 
 void bob() {
-    for(;;) {
-        Finally release([&](){ oven.release(); cookieSheet.release(); });
-        struct timespec deadline = deadline_from_now(5000);
-        if (!oven.reserve(deadline) || !cookieSheet.reserve(deadline)) {
-            printf("Bob failed to reserve oven, retrying...\n");
-            sleep(rand() % 6 + 1); // Sleep 1-6 seconds before retrying
-            continue;
-        }
-        printf("Bob is cooking cookies...\n");
-        cookieSheet.cookies(8);
-        oven.temperature(400);
-        sleep(6);
-        break;
-    }
+    const int timeout_ms = 5000;
+    const int backoff_ms = 6000;
+    auto release = Guarded::requires_all(timeout_ms, backoff_ms, oven, cookieSheet);
+    std::cout << "Bob is cooking cookies..." << std::endl;
+    cookieSheet.cookies(8);
+    oven.temperature(400);
+    sleep(6);
 }
 
 int main() {
     std::thread alice_thread(alice);
     std::thread bob_thread(bob);
-    printf("Alice and Bob are cooking cookies...\n");
+    std::cout << "Alice and Bob are cooking cookies..." << std::endl;
     alice_thread.join();
     bob_thread.join();
     return 0;
 }
-
