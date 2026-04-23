@@ -44,7 +44,7 @@ struct Dataset {
 
     explicit Dataset(std::size_t vec_size = 10'000,  // ~40 MB of ints
                      std::size_t bust_size = 32'000'000, // ~128 MB of ints for cache busting
-                     std::size_t map_size = 5'000,
+                     std::size_t map_size = 10,
                      std::uint64_t seed = 0xBADC0FFEEULL) 
     {
         RNG rng(seed);
@@ -106,6 +106,15 @@ struct Test {
     std::function<std::uint64_t(Dataset& ds, RNG& rng)> body;
 };
 
+template <typename T>
+std::vector<T> permute(size_t n, RNG &rng) {
+  std::vector<T> p(n);
+  std::iota(p.begin(), p.end(), 0);
+  std::shuffle(p.begin(), p.end(), rng.eng);
+  return p;
+}
+
+
 static std::vector<Test> make_tests() {
     std::vector<Test> tests;
 
@@ -118,7 +127,10 @@ static std::vector<Test> make_tests() {
             // Use only the "logical" vector portion used for vec tests (ds.rand_indices size)
             std::size_t N = ds.rand_indices.size();
             // We sum the first N elements of big_vec (contiguous)
-            for (std::size_t i = 0; i < N; ++i) sum += (unsigned)ds.big_vec[i];
+            for (std::size_t i = 0; i < N; ++i) {
+                sum += (unsigned)ds.rand_indices[i];
+                sum += (unsigned)ds.big_vec[i];
+            }
             g_sink += sum;
             return sum;
         }
@@ -130,7 +142,7 @@ static std::vector<Test> make_tests() {
         "Sum vector elements at random indices (random access).",
         [](Dataset& ds, RNG&) -> std::uint64_t {
             std::uint64_t sum = 0;
-            std::size_t N = ds.rand_indices.size();
+            std::size_t N = std::min(ds.rand_indices.size(),ds.big_vec.size());;
             for (std::size_t i = 0; i < N; ++i) {
                 int idx = ds.rand_indices[i];
                 sum += (unsigned)ds.big_vec[(std::size_t)idx];
@@ -158,10 +170,9 @@ static std::vector<Test> make_tests() {
         "Random std::map lookups by key and sum found values.",
         [](Dataset& ds, RNG& rng) -> std::uint64_t {
             std::uint64_t sum = 0;
-            // Do a fixed number of random lookups to keep time reasonable
-            const std::size_t lookups = 1'000'000;
-            for (std::size_t i = 0; i < lookups; ++i) {
-                int k = (int)rng.uniform<std::size_t>(0, ds.m.size() - 1);
+	    std::vector<int> idx = permute<int>(ds.m.size());
+	    
+            for (auto i : idx) {
                 auto it = ds.m.find(k);
                 if (it != ds.m.end()) sum += (unsigned)it->second;
             }
