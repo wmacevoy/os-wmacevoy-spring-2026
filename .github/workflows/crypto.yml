@@ -1,0 +1,110 @@
+name: crypto
+
+on:
+  push:
+    paths:
+      - 'crypto/**'
+      - '.github/workflows/crypto.yml'
+  pull_request:
+    paths:
+      - 'crypto/**'
+      - '.github/workflows/crypto.yml'
+  workflow_dispatch:
+
+jobs:
+  unix:
+    name: ${{ matrix.os }} / ${{ matrix.backend }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        backend: [pure-c, openssl]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenSSL dev (Ubuntu)
+        if: matrix.os == 'ubuntu-latest' && matrix.backend == 'openssl'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: Install / locate Homebrew OpenSSL (macOS)
+        if: matrix.os == 'macos-latest' && matrix.backend == 'openssl'
+        id: brew_ssl
+        run: |
+          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+          echo "prefix=$(brew --prefix openssl@3)" >> "$GITHUB_OUTPUT"
+
+      - name: Build + NIST vectors + round-trip (pure-C)
+        if: matrix.backend == 'pure-c'
+        working-directory: crypto
+        run: make test
+
+      - name: Build + NIST vectors + round-trip (OpenSSL, Linux)
+        if: matrix.backend == 'openssl' && matrix.os == 'ubuntu-latest'
+        working-directory: crypto
+        run: make test AES_GCM_USE_OPENSSL=1
+
+      - name: Build + NIST vectors + round-trip (OpenSSL, macOS)
+        if: matrix.backend == 'openssl' && matrix.os == 'macos-latest'
+        working-directory: crypto
+        run: make test AES_GCM_USE_OPENSSL=1 OPENSSL_PREFIX=${{ steps.brew_ssl.outputs.prefix }}
+
+      - name: Cross-backend interop (build second binary, exchange blobs)
+        working-directory: crypto
+        env:
+          OSSL_PREFIX: ${{ steps.brew_ssl.outputs.prefix }}
+        run: |
+          set -eux
+          make clean
+          # Build both variants into separately-named binaries.
+          make mkaesgcm
+          mv mkaesgcm mkaesgcm_pure
+          make clean
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            make mkaesgcm AES_GCM_USE_OPENSSL=1 OPENSSL_PREFIX="$OSSL_PREFIX"
+          else
+            make mkaesgcm AES_GCM_USE_OPENSSL=1
+          fi
+          mv mkaesgcm mkaesgcm_ossl
+
+          # Encrypt with one, decrypt with the other, and vice-versa.
+          TMP=$(mktemp -d)
+          trap 'rm -rf "$TMP"' EXIT
+          dd if=/dev/urandom of="$TMP/pt" bs=1 count=4096 2>/dev/null
+          printf 'cross-backend-aad' > "$TMP/aad"
+
+          ./mkaesgcm_pure --keygen --key "$TMP/K"
+
+          ./mkaesgcm_pure --key "$TMP/K" --encrypt "$TMP/pt" --data "$TMP/aad" --out "$TMP/sealed_pure"
+          ./mkaesgcm_ossl --key "$TMP/K" --decrypt "$TMP/sealed_pure" --out "$TMP/out_ossl"
+          cmp "$TMP/pt" "$TMP/out_ossl"
+
+          ./mkaesgcm_ossl --key "$TMP/K" --encrypt "$TMP/pt" --data "$TMP/aad" --out "$TMP/sealed_ossl"
+          ./mkaesgcm_pure --key "$TMP/K" --decrypt "$TMP/sealed_ossl" --out "$TMP/out_pure"
+          cmp "$TMP/pt" "$TMP/out_pure"
+
+          echo "cross-backend interop OK"
+
+  windows:
+    name: windows-latest / bcrypt (mingw)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2 + mingw-w64 gcc + make
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            make
+            mingw-w64-x86_64-gcc
+
+      - name: Build + NIST vectors + round-trip (BCrypt)
+        working-directory: crypto
+        # The Makefile auto-adds -lbcrypt when OS=Windows_NT (set by MSYS2).
+        run: make test
