@@ -6,7 +6,7 @@
 
 void child() {
     printf("Hello from Child Process (pid %d)!\n", getpid());
-    execl("./hi", "hi", (char *)NULL);
+    execl("./xhi", "hi", (char *)NULL);
 //    sleep(1);
     printf("Child Process (pid %d) exiting.\n", getpid());
 }
@@ -14,7 +14,9 @@ void child() {
 void parent(pid_t child_pid) {
     printf("Hello from Parent Process (parent pid %d, child pid %d)!\n", 
         getpid(), child_pid);
+        if (!background) {
     waitpid(child_pid, NULL, 0); // Wait for child to finish
+        }
     printf("Parent Process (pid %d) exiting.\n", getpid());
 }
 

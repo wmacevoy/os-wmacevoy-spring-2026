@@ -1,5 +1,10 @@
 CFLAGS = -Wall -Wextra -g -std=c11
 
+all : hi fork-exec
+
+run : all
+	./fork-exec
+	
 hi : hi.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS)
 
