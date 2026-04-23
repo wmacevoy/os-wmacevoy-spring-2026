@@ -32,7 +32,9 @@ struct cookie_sheet {
 
 struct oven oven = { .temperature = 0, .mutex = PTHREAD_MUTEX_INITIALIZER };
 struct cookie_sheet cookie_sheet = { .cookies = 0, .mutex = PTHREAD_MUTEX_INITIALIZER };
-
+bool bad_tempperature_sensor() {
+    return rand() % 10 == 0; // 10% chance of failure
+}
 int alice_cooking() {
     // Simulate cooking time
     cookie_sheet.cookies = 12;

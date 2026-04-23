@@ -10,10 +10,13 @@ struct info {
     int result;
 };
 
+int global = 3;
+
 void* thread_func(void* void_info) {
     struct info* info = (struct info*)void_info;
     long arg = info->data;
-    printf("Hello from thread %d!\n", arg);
+    printf("Hello from thread %d @ %p!\n", arg, &arg);
+    printf(" Global value is %d @ %p\n", global, &global);
     info->result = arg * 2;
     return void_info;
 }
