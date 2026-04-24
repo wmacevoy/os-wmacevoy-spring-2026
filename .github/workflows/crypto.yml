@@ -102,6 +102,7 @@ jobs:
           update: false
           install: >-
             make
+            diffutils
             mingw-w64-x86_64-gcc
 
       - name: Build + NIST vectors + round-trip (BCrypt)
