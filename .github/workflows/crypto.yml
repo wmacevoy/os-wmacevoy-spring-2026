@@ -29,7 +29,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev
 
       - name: Install / locate Homebrew OpenSSL (macOS)
-        if: matrix.os == 'macos-latest' && matrix.backend == 'openssl'
+        if: matrix.os == 'macos-latest'
         id: brew_ssl
         run: |
           brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3

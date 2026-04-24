@@ -19,7 +19,9 @@ static int valid_buf(const void *p, size_t n) {
 #if defined(_WIN32)
 #include <windows.h>
 #include <bcrypt.h>
+#if defined(_MSC_VER)
 #pragma comment(lib, "bcrypt.lib")
+#endif
 
 typedef struct {
     BCRYPT_ALG_HANDLE alg;

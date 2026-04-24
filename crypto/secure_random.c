@@ -1,3 +1,13 @@
+#if !defined(_WIN32) && !defined(__APPLE__)
+/* Expose O_CLOEXEC (POSIX.1-2008) and getrandom() under strict -std=c11. */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+#endif
+
 #include "secure_random.h"
 
 #include <errno.h>
