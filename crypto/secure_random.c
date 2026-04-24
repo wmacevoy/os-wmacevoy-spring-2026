@@ -17,7 +17,12 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <bcrypt.h>
+#if defined(_MSC_VER)
 #pragma comment(lib, "bcrypt.lib")
+#endif
+#ifndef STATUS_SUCCESS
+#define STATUS_SUCCESS ((NTSTATUS)0x00000000L)
+#endif
 
 int secure_random_bytes(void *out, size_t n) {
     if (n == 0) {
